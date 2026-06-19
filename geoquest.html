@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GeoQuest</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#3a2510}
+#gameContainer{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+canvas{background:#f5e6c8;display:block;max-width:100vw;max-height:100vh;object-fit:contain;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="gameContainer"><canvas id="gc" width="960" height="640"></canvas></div>
+<script>
+(function(){
+"use strict";
+
+const canvas=document.getElementById('gc');
+const ctx=canvas.getContext('2d');
+const W=960,H=640;
+
+// ---- AUDIO ----
+let audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();}
+function playTone(f,d,t,v){try{initAudio();const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=t||'sine';o.frequency.setValueAtTime(f,audioCtx.currentTime);g.gain.setValueAtTime(v||0.3,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);}catch(e){}}
+function playCorrect(){playTone(523,0.12,'sine',0.25);setTimeout(()=>playTone(659,0.12,'sine',0.25),100);setTimeout(()=>playTone(784,0.18,'sine',0.25),200);}
+function playIncorrect(){playTone(200,0.3,'sawtooth',0.2);}
+function playLevelUp(){[523,587,659,698,784].forEach((f,i)=>setTimeout(()=>playTone(f,0.1,'sine',0.2),i*70));}
+function playGameOver(){playTone(300,0.3,'sawtooth',0.25);setTimeout(()=>playTone(220,0.4,'sawtooth',0.25),300);setTimeout(()=>playTone(150,0.6,'sawtooth',0.2),600);}
+
+// ---- INPUT ----
+const keys={},mouse={x:0,y:0,clicked:false,prevClicked:false};
+document.addEventListener('keydown',e=>{if(!keys[e.key]||keys[e.key]===0)keys[e.key]=2;if(e.key===' '||e.key==='Enter'||e.key==='Escape')e.preventDefault();});
+document.addEventListener('keyup',e=>{keys[e.key]=0;e.preventDefault();});
+canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();mouse.x=(e.clientX-r.left)*(W/r.width);mouse.y=(e.clientY-r.top)*(H/r.height);});
+canvas.addEventListener('mousedown',e=>{mouse.clicked=true;mouse.prevClicked=true;initAudio();e.preventDefault();});
+canvas.addEventListener('mouseup',()=>{mouse.clicked=false;});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='playing')state='paused';});
+function justPressed(k){if(keys[k]===2){keys[k]=1;return true;}return false;}
+
+// ---- COUNTRY DATA (30+ countries, simplified polygons) ----
+// Coordinates are mapped to 960x640 canvas space
+// Polygons are simplified ~8-20 vertex outlines
+const countries={
+ USA:{name:'United States',capital:'Washington D.C.',flagColors:['#b22234','#ffffff','#3c3b6e'],
+   poly:[[80,140],[130,130],[170,135],[210,125],[230,130],[240,145],[235,160],[220,170],[200,175],[180,180],[160,190],[140,195],[120,185],[100,175],[85,165],[75,155],[70,148],[75,143]],
+   cx:275,cy:182},
+ Canada:{name:'Canada',capital:'Ottawa',flagColors:['#ff0000','#ffffff'],
+   poly:[[80,80],[130,70],[180,65],[230,70],[260,80],[270,95],[265,110],[250,120],[235,125],[220,120],[200,115],[180,112],[160,115],[140,118],[120,115],[100,110],[90,100],[85,90]],
+   cx:278,cy:159},
+ Mexico:{name:'Mexico',capital:'Mexico City',flagColors:['#006847','#ffffff','#ce1126'],
+   poly:[[100,190],[120,195],[140,200],[150,220],[155,240],[150,260],[140,275],[125,280],[110,275],[95,260],[85,240],[80,220],[82,205],[90,195]],
+   cx:216,cy:251},
+ Brazil:{name:'Brazil',capital:'Brasilia',flagColors:['#009739','#ffcc29','#002776'],
+   poly:[[180,320],[200,310],[230,310],[260,320],[280,340],[290,370],[285,400],[270,420],[245,430],[220,425],[195,410],[180,390],[170,365],[168,345],[172,330]],
+   cx:352,cy:376},
+ Argentina:{name:'Argentina',capital:'Buenos Aires',flagColors:['#75aadb','#ffffff','#75aadb'],
+   poly:[[200,400],[220,395],[245,400],[260,415],[265,440],[260,465],[245,480],[225,485],[210,475],[200,455],[195,435],[195,418]],
+   cx:324,cy:443},
+ UK:{name:'United Kingdom',capital:'London',flagColors:['#012169','#ffffff','#c8102e'],
+   poly:[[310,100],[320,95],[335,95],[345,100],[348,115],[340,130],[330,138],[318,135],[310,120],[308,110]],
+   cx:480,cy:137},
+ France:{name:'France',capital:'Paris',flagColors:['#0055a4','#ffffff','#ef4135'],
+   poly:[[320,110],[340,108],[355,115],[360,130],[358,150],[350,168],[340,178],[325,175],[315,160],[310,142],[312,125]],
+   cx:486,cy:146},
+ Germany:{name:'Germany',capital:'Berlin',flagColors:['#000000','#dd0000','#ffce00'],
+   poly:[[335,95],[355,90],[375,95],[385,110],[380,130],[365,140],[350,138],[340,125],[335,110]],
+   cx:516,cy:133},
+ Italy:{name:'Italy',capital:'Rome',flagColors:['#009246','#ffffff','#ce2b37'],
+   poly:[[340,140],[355,135],[370,145],[375,165],[365,185],[350,192],[338,185],[330,168],[332,150]],
+   cx:513,cy:171},
+ Spain:{name:'Spain',capital:'Madrid',flagColors:['#c60b1e','#ffc400','#c60b1e'],
+   poly:[[328,155],[345,148],[360,155],[365,170],[358,185],[345,190],[335,185],[325,172],[325,162]],
+   cx:470,cy:176},
+ Portugal:{name:'Portugal',capital:'Lisbon',flagColors:['#006600','#ff0000'],
+   poly:[[320,160],[328,158],[332,170],[328,182],[320,178],[316,168]],
+   cx:456,cy:182},
+ Sweden:{name:'Sweden',capital:'Stockholm',flagColors:['#0055a4','#ffcc00'],
+   poly:[[360,70],[380,65],[400,70],[410,85],[405,100],[395,108],[380,105],[365,100],[358,85]],
+   cx:528,cy:109},
+ Norway:{name:'Norway',capital:'Oslo',flagColors:['#ef2b2d','#ffffff','#002868'],
+   poly:[[345,55],[365,50],[385,55],[395,70],[390,85],[375,90],[360,85],[350,75],[345,65]],
+   cx:509,cy:107},
+ Russia:{name:'Russia',capital:'Moscow',flagColors:['#ffffff','#0033a0','#da291c'],
+   poly:[[390,70],[430,60],[480,55],[530,60],[570,70],[590,85],[585,100],[570,110],[540,115],[500,112],[460,110],[430,105],[410,100],[395,90],[388,80]],
+   cx:580,cy:122},
+ China:{name:'China',capital:'Beijing',flagColors:['#de2910','#ffde00'],
+   poly:[[520,120],[560,110],[600,115],[635,125],[655,145],[650,165],[635,180],[610,185],[580,180],[550,170],[530,155],[518,138]],
+   cx:790,cy:178},
+ India:{name:'India',capital:'New Delhi',flagColors:['#ff9933','#ffffff','#138808'],
+   poly:[[550,165],[580,155],[610,160],[630,175],[635,195],[625,215],[610,225],[590,220],[570,210],[555,195],[545,178]],
+   cx:686,cy:218},
+ Japan:{name:'Japan',capital:'Tokyo',flagColors:['#ffffff','#bc002d'],
+   poly:[[630,130],[648,125],[665,135],[675,155],[670,175],[658,188],[640,185],[628,170],[625,150]],
+   cx:853,cy:193},
+ SouthKorea:{name:'South Korea',capital:'Seoul',flagColors:['#ffffff','#003478','#cd2e3a','#0047a0'],
+   poly:[[648,150],[660,145],[672,152],[676,168],[665,180],[652,175],[645,162]],
+   cx:809,cy:185},
+ Australia:{name:'Australia',capital:'Canberra',flagColors:['#012169','#ffffff','#c8102e'],
+   poly:[[510,380],[550,370],[590,375],[620,390],[635,410],[625,435],[600,445],[570,440],[540,430],[520,415],[508,398]],
+   cx:878,cy:446},
+ Egypt:{name:'Egypt',capital:'Cairo',flagColors:['#ce1126','#ffffff','#000000'],
+   poly:[[440,185],[460,178],[480,182],[490,195],[485,210],[470,218],[455,215],[440,205],[435,192]],
+   cx:563,cy:213},
+ Nigeria:{name:'Nigeria',capital:'Abuja',flagColors:['#008751','#ffffff','#008751'],
+   poly:[[430,220],[450,215],[470,222],[478,240],[472,260],[455,268],[438,262],[428,245],[425,232]],
+   cx:500,cy:288},
+ SouthAfrica:{name:'South Africa',capital:'Pretoria',flagColors:['#007a4d','#ffb612','#de3831','#002395','#ffffff'],
+   poly:[[435,340],[460,330],[485,335],[505,350],[508,370],[495,390],[475,395],[455,388],[438,375],[430,358]],
+   cx:555,cy:411},
+ SaudiArabia:{name:'Saudi Arabia',capital:'Riyadh',flagColors:['#006c35','#ffffff'],
+   poly:[[475,155],[505,145],[530,155],[540,175],[535,195],[520,210],[500,215],[485,205],[472,185],[470,168]],
+   cx:605,cy:232},
+ Turkey:{name:'Turkey',capital:'Ankara',flagColors:['#e30a17','#ffffff'],
+   poly:[[395,130],[415,125],[435,130],[445,145],[440,160],[425,168],[410,165],[398,152],[392,140]],
+   cx:568,cy:178},
+ Indonesia:{name:'Indonesia',capital:'Jakarta',flagColors:['#ff0000','#ffffff'],
+   poly:[[570,260],[600,255],[630,265],[640,285],[625,300],[600,305],[580,295],[565,278]],
+   cx:765,cy:342},
+ Thailand:{name:'Thailand',capital:'Bangkok',flagColors:['#ed1c24','#ffffff','#241d4f','#ffffff','#ed1c24'],
+   poly:[[550,200],[575,195],[600,200],[615,215],[610,235],[595,245],[575,242],[555,230],[545,215]],
+   cx:748,cy:271},
+ Vietnam:{name:'Vietnam',capital:'Hanoi',flagColors:['#da251d','#ff0'],
+   poly:[[578,178],[595,175],[610,182],[618,200],[612,218],[600,225],[588,218],[578,200],[575,188]],
+   cx:762,cy:245},
+ Philippines:{name:'Philippines',capital:'Manila',flagColors:['#0038a8','#ce1126','#ffffff','#fcd116'],
+   poly:[[615,215],[628,210],[640,220],[645,240],[638,260],[625,268],[612,258],[608,238]],
+   cx:803,cy:268},
+ Kenya:{name:'Kenya',capital:'Nairobi',flagColors:['#000000','#ffffff','#006600','#bb0000'],
+   poly:[[458,265],[478,258],[498,265],[508,285],[500,305],[482,312],[465,305],[452,288],[450,272]],
+   cx:578,cy:325},
+ Poland:{name:'Poland',capital:'Warsaw',flagColors:['#ffffff','#dc143c'],
+   poly:[[370,100],[388,96],[405,102],[410,118],[400,130],[385,132],[372,125],[365,112]],
+   cx:536,cy:134},
+ Greece:{name:'Greece',capital:'Athens',flagColors:['#0d5eaf','#ffffff'],
+   poly:[[390,140],[405,135],[420,142],[425,158],[415,170],[400,172],[388,162],[385,150]],
+   cx:543,cy:185}
+};
+
+// ---- LANDMARK DATA ----
+const landmarks={
+ Amazon:{name:'Amazon Rainforest',country:'Brazil',cx:200,cy:340,desc:'Largest rainforest on Earth'},
+ Himalayas:{name:'Himalayas',country:'India',cx:560,cy:130,desc:'Highest mountain range'},
+ Sahara:{name:'Sahara Desert',country:'Egypt',cx:430,cy:170,desc:'Largest hot desert'},
+ GreatBarrierReef:{name:'Great Barrier Reef',country:'Australia',cx:610,cy:380,desc:'Largest coral reef system'},
+ Alps:{name:'Alps Mountains',country:'France',cx:350,cy:130,desc:'Major mountain range in Europe'},
+ Andes:{name:'Andes Mountains',country:'Argentina',cx:200,cy:410,desc:'Longest mountain range'},
+ Nile:{name:'Nile River',country:'Egypt',cx:450,cy:190,desc:'Longest river in the world'},
+ AmazonRiver:{name:'Amazon River',country:'Brazil',cx:230,cy:360,desc:'Second longest river'},
+ Gobi:{name:'Gobi Desert',country:'China',cx:550,cy:110,desc:'Large desert in Asia'},
+ Mediterranean:{name:'Mediterranean Sea',country:'Spain',cx:340,cy:155,desc:'Sea between Europe and Africa'},
+ Caribbean:{name:'Caribbean Sea',country:'Mexico',cx:130,cy:210,desc:'Sea southeast of North America'},
+ Greenland:{name:'Greenland',country:'Canada',cx:220,cy:55,desc:'World\'s largest island'},
+ Madagascar:{name:'Madagascar',country:'South Africa',cx:500,cy:370,desc:'Large island off Africa'},
+ Siberia:{name:'Siberia',country:'Russia',cx:480,cy:60,desc:'Vast Russian region'},
+ Patagonia:{name:'Patagonia',country:'Argentina',cx:230,cy:465,desc:'Southern region of South America'},
+ CongoBasin:{name:'Congo Basin',country:'Nigeria',cx:440,cy:250,desc:'Large rainforest in Africa'},
+ LakeBaikal:{name:'Lake Baikal',country:'Russia',cx:530,cy:65,desc:'Deepest lake in the world'},
+ MountEverest:{name:'Mount Everest',country:'India',cx:555,cy:135,desc:'Highest mountain on Earth'},
+ VictoriaFalls:{name:'Victoria Falls',country:'South Africa',cx:460,cy:355,desc:'One of the largest waterfalls'},
+ DeadSea:{name:'Dead Sea',country:'Saudi Arabia',cx:490,cy:170,desc:'Lowest point on Earth'}
+};
+
+// Build country list and reverse lookups
+const countryList=Object.values(countries);
+const countryKeys=Object.keys(countries);
+const landmarkList=Object.values(landmarks);
+
+function findCountryByName(name){
+ for(const k of countryKeys){
+  if(countries[k].name===name)return k;
+ }
+ return null;
+}
+
+function findCountryByCapital(capital){
+ for(const k of countryKeys){
+  if(countries[k].capital===capital)return k;
+ }
+ return null;
+}
+
+// ---- GAME STATE ----
+let state='title';
+let score=0,highScore=parseInt(localStorage.getItem('gq_highScore'))||0;
+let lives=3,streak=0,maxStreak=0,qIndex=0,totalQuestions=0,correctQuestions=0;
+let mode=0; // 0=country explorer,1=capital quest,2=landmark locator,3=flag flash,4=world marathon
+const modeNames=['Country Explorer','Capital Quest','Landmark Locator','Flag Flash','World Marathon'];
+let diffIdx=0; // 0=easy,1=hard
+const diffNames=['Easy (Labels)','Hard (No Labels)'];
+let currentQuestion=null;
+let timeLeft=0,timeLimit=15;
+let flashTimer=0,flashColor='',flashRegion='';
+let showAnswer=false;
+let paused=false;
+let questionQueue=[];
+let gameOverStats={};
+let quizActive=false;
+let zoomScale=1,zoomOffsetX=0,zoomOffsetY=0;
+
+// ---- QUESTION GENERATION ----
+function generateQuestions(count){
+ const qs=[];
+ const pool=[];
+
+ // Country questions
+ for(const k of countryKeys){
+  const c=countries[k];
+  pool.push({type:'country',prompt:'Click on '+c.name,answer:k});
+  pool.push({type:'capital',prompt:'Click on the capital of '+c.name+': '+c.capital,answer:k});
+ }
+
+ // Landmark questions
+ for(const lk of Object.keys(landmarks)){
+  const lm=landmarks[lk];
+  const ck=findCountryByName(lm.country);
+  if(ck){
+   pool.push({type:'landmark',prompt:'Click on: '+lm.name+' ('+lm.desc+')',answer:ck});
+  }
+ }
+
+ // Flag questions
+ for(const k of countryKeys){
+  pool.push({type:'flag',prompt:'Which country has this flag?',answer:k});
+ }
+
+ // Shuffle and pick
+ for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
+
+ for(let i=0;i<Math.min(count||50,pool.length);i++)qs.push(pool[i]);
+ return qs;
+}
+
+function generateMarathonQuestions(){
+ return generateQuestions(25);
+}
+
+function loadNextQuestion(){
+ if(qIndex>=questionQueue.length){
+  // Generate more
+  questionQueue=generateQuestions(50);
+  qIndex=0;
+ }
+ currentQuestion=questionQueue[qIndex++];
+ totalQuestions++;
+ timeLeft=diffIdx===0?15:7;
+ showAnswer=false;
+ flashTimer=0;
+}
+
+function checkClick(regionKey){
+ if(!currentQuestion||showAnswer)return;
+ const correct=currentQuestion.answer===regionKey;
+ flashRegion=regionKey;
+
+ if(correct){
+  streak++;correctQuestions++;
+  if(streak>maxStreak)maxStreak=streak;
+  const mult=Math.min(streak,5);
+  let pts=200*mult+Math.round(timeLeft*20);
+  score+=pts;
+  flashTimer=1.0;flashColor='#2ecc71';
+  playCorrect();
+  setTimeout(()=>{loadNextQuestion();},800);
+ }else{
+  streak=0;lives--;
+  flashTimer=1.0;flashColor='#e74c3c';
+  showAnswer=true;
+  playIncorrect();
+  if(lives<=0){
+   setTimeout(()=>{
+    state='gameover';
+    gameOverStats={score,correctQuestions,totalQuestions,accuracy:totalQuestions>0?Math.round(correctQuestions/totalQuestions*100):0,maxStreak};
+    if(score>highScore){highScore=score;localStorage.setItem('gq_highScore',highScore);}
+    playGameOver();
+   },500);
+  }else{
+   setTimeout(()=>{loadNextQuestion();},1500);
+  }
+ }
+}
+
+// ---- RENDERING ----
+function drawFlag(ctx,x,y,w,h,colors){
+ // Simplified flag rendering
+ if(colors.length===2){
+  // Two horizontal stripes
+  const grad=ctx.createLinearGradient(x,y,x,y+h);
+  grad.addColorStop(0,colors[0]);grad.addColorStop(0.5,colors[0]);
+  grad.addColorStop(0.5,colors[1]);grad.addColorStop(1,colors[1]);
+  ctx.fillStyle=grad;ctx.fillRect(x,y,w,h);
+ }else if(colors.length===3){
+  // Three vertical stripes (default)
+  const stripeW=w/3;
+  for(let i=0;i<3;i++){
+   ctx.fillStyle=colors[i]||'#ffffff';
+   ctx.fillRect(x+i*stripeW,y,stripeW+1,h);
+  }
+ }else{
+  // Fallback
+  ctx.fillStyle=colors[0]||'#ccc';
+  ctx.fillRect(x,y,w,h);
+ }
+ // Border
+ ctx.strokeStyle='#5c4033';ctx.lineWidth=2;
+ ctx.strokeRect(x,y,w,h);
+}
+
+function drawMap(labels){
+ // Draw SVG world map as background
+ if(!window.worldMapImg){
+  const img=new Image();
+  img.src='/world-map.svg';
+  window.worldMapImg=img;
+ }
+ const img=window.worldMapImg;
+ if(img.complete&&img.naturalWidth>0){
+  ctx.drawImage(img,0,0,W,H);
+ } else {
+  // Fallback water while loading
+  ctx.fillStyle='#4682b4';
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#6b8e23';
+  ctx.font='20px sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText('Loading world map...',W/2,H/2);
+ }
+
+ // Draw country highlights
+ for(const k of countryKeys){
+  const c=countries[k];
+  // Flash region highlight - draw circle at center
+  if(flashTimer>0&&flashRegion===k){
+   ctx.beginPath();
+   ctx.arc(c.cx,c.cy,15,0,Math.PI*2);
+   ctx.fillStyle=flashColor;
+   ctx.fill();
+   ctx.strokeStyle='#fff';ctx.lineWidth=2;
+   ctx.stroke();
+  }
+  // Labels
+  if(labels){
+   ctx.textAlign='center';
+   ctx.font='bold 11px sans-serif';
+   ctx.fillStyle='#ffffff';
+   ctx.shadowColor='#000';ctx.shadowBlur=4;
+   ctx.fillText(c.name,c.cx,c.cy);
+   ctx.shadowBlur=0;
+  }
+ }
+
+ // Decorative compass
+ const cx=W-70,cy=70;
+ ctx.save();
+ ctx.translate(cx,cy);
+ ctx.strokeStyle='#cd7f32';ctx.lineWidth=2;
+ ctx.beginPath();ctx.arc(0,0,28,0,Math.PI*2);ctx.stroke();
+ ctx.fillStyle='#cd7f32';
+ ctx.font='16px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+ ctx.fillText('N',0,-22);
+ ctx.fillText('S',0,22);
+ ctx.fillText('E',22,0);
+ ctx.fillText('W',-22,0);
+ ctx.restore();
+
+ // Parchment border
+ ctx.strokeStyle='#5c4033';ctx.lineWidth=4;
+ ctx.strokeRect(2,2,W-4,H-4);
+ ctx.strokeStyle='#cd7f32';ctx.lineWidth=2;
+ ctx.strokeRect(6,6,W-12,H-12);
+}
+
+function drawTitle(){
+ ctx.fillStyle='#f5e6c8';ctx.fillRect(0,0,W,H);
+
+ // Parchment border
+ ctx.strokeStyle='#5c4033';ctx.lineWidth=6;
+ ctx.strokeRect(5,5,W-10,H-10);
+
+ ctx.textAlign='center';
+ ctx.shadowColor='#5c4033';ctx.shadowBlur=15;
+ ctx.font='bold 56px serif';
+ ctx.fillStyle='#5c4033';
+ ctx.fillText('GeoQuest',W/2,120);
+ ctx.shadowBlur=0;
+
+ ctx.font='20px serif';
+ ctx.fillStyle='#8b6914';
+ ctx.fillText('Geography Trivia Adventure',W/2,160);
+
+ // Decorative compass
+ ctx.save();
+ ctx.translate(W/2,220);
+ ctx.strokeStyle='#cd7f32';ctx.lineWidth=3;
+ ctx.beginPath();ctx.arc(0,0,50,0,Math.PI*2);ctx.stroke();
+ ctx.font='bold 20px serif';ctx.fillStyle='#cd7f32';ctx.textAlign='center';ctx.textBaseline='middle';
+ ctx.fillText('N',0,-40);
+ ctx.fillText('S',0,40);
+ ctx.fillText('E',40,0);
+ ctx.fillText('W',-40,0);
+ ctx.restore();
+
+ // Modes
+ for(let i=0;i<5;i++){
+  const y=300+i*36;
+  ctx.font='20px sans-serif';
+  ctx.fillStyle=i===mode?'#2ecc71':'#5c4033';
+  ctx.fillText((i===mode?'▶ ':'  ')+modeNames[i],W/2-200,y);
+ }
+
+ // Difficulty
+ ctx.font='18px sans-serif';ctx.fillStyle='#5c4033';
+ ctx.fillText('Difficulty:',W/2-200,510);
+ for(let i=0;i<2;i++){
+  ctx.fillStyle=i===diffIdx?'#cd7f32':'#8d6e40';
+  ctx.fillText((i===diffIdx?'[ ':'  ')+diffNames[i]+(i===diffIdx?' ]':''),W/2-60+i*200,510);
+ }
+
+ ctx.font='16px sans-serif';ctx.fillStyle='#8b6914';
+ ctx.fillText('↑↓: mode  |  D: difficulty  |  Enter: start  |  Esc: pause',W/2,565);
+ ctx.fillStyle='#cd7f32';
+ ctx.font='18px sans-serif';
+ ctx.fillText('High Score: '+highScore,W/2,45);
+}
+
+function drawGame(){
+ // Draw map with labels (if easy mode)
+ drawMap(diffIdx===0);
+
+ // Question panel at top
+ ctx.fillStyle='rgba(245,230,200,0.92)';
+ ctx.fillRect(100,10,760,65);
+ ctx.strokeStyle='#5c4033';ctx.lineWidth=2;
+ ctx.strokeRect(100,10,760,65);
+
+ ctx.textAlign='center';
+ ctx.font='bold 20px sans-serif';
+ ctx.fillStyle='#5c4033';
+ if(currentQuestion){
+  // Flag mode shows extra
+  if(currentQuestion.type==='flag'){
+   ctx.fillText(currentQuestion.prompt,W/2,40);
+   // Show small flag
+   const ck=currentQuestion.answer;
+   if(countries[ck]){
+    drawFlag(ctx,W/2-20,50,40,25,countries[ck].flagColors);
+   }
+  }else{
+   ctx.fillText(currentQuestion.prompt,W/2,40);
+  }
+ }else{
+  ctx.fillText('Click on the correct location!',W/2,40);
+ }
+
+ // Timer bar
+ const barW=300,barH=12;
+ const t=timeLeft/(diffIdx===0?15:7);
+ ctx.fillStyle='#5c4033';
+ ctx.fillRect(W/2-barW/2,78,barW,barH);
+ ctx.fillStyle=t>0.3?'#2ecc71':t>0.15?'#f39c12':'#e74c3c';
+ ctx.fillRect(W/2-barW/2+2,80,(barW-4)*Math.max(0,t),barH-4);
+
+ // HUD
+ ctx.textAlign='left';
+ ctx.font='bold 18px "Courier New",Courier,monospace';
+ ctx.fillStyle='#5c4033';
+ ctx.fillText('Score: '+score,15,30);
+ ctx.textAlign='right';
+ ctx.fillStyle='#e74c3c';
+ let hearts='';
+ for(let i=0;i<lives;i++)hearts+='♥ ';
+ ctx.fillText(hearts,W-15,30);
+ ctx.textAlign='left';
+ ctx.font='16px sans-serif';
+ ctx.fillStyle='#cd7f32';
+ ctx.fillText('Streak: '+streak+'x',15,52);
+ ctx.fillStyle='#4682b4';
+ ctx.fillText('Q: '+totalQuestions,15,72);
+
+ // Show correct answer after wrong
+ if(showAnswer&&currentQuestion){
+  ctx.textAlign='center';
+  ctx.font='18px sans-serif';
+  ctx.fillStyle='#e74c3c';
+  const ck=currentQuestion.answer;
+  const cn=countries[ck]?countries[ck].name:ck;
+  ctx.fillText('Answer: '+cn,480,95);
+ }
+}
+
+function drawGameOver(){
+ ctx.fillStyle='rgba(245,230,200,0.95)';ctx.fillRect(0,0,W,H);
+ ctx.strokeStyle='#5c4033';ctx.lineWidth=6;
+ ctx.strokeRect(5,5,W-10,H-10);
+
+ ctx.textAlign='center';
+ ctx.shadowColor='#e74c3c';ctx.shadowBlur=15;
+ ctx.font='bold 52px serif';
+ ctx.fillStyle='#e74c3c';
+ ctx.fillText('Expedition Complete',W/2,140);
+ ctx.shadowBlur=0;
+
+ ctx.font='28px sans-serif';ctx.fillStyle='#5c4033';
+ ctx.fillText('Score: '+score,W/2,210);
+ ctx.fillStyle='#cd7f32';
+ ctx.fillText('High Score: '+highScore,W/2,250);
+
+ ctx.font='20px sans-serif';ctx.fillStyle='#5c4033';
+ ctx.fillText('Correct: '+gameOverStats.correctQuestions+' / '+gameOverStats.totalQuestions,W/2,300);
+ ctx.fillText('Accuracy: '+gameOverStats.accuracy+'%',W/2,330);
+ ctx.fillText('Best Streak: '+gameOverStats.maxStreak+'x',W/2,360);
+
+ // Medal based on accuracy
+ let medal='';
+ if(gameOverStats.accuracy>=90)medal='★ GOLD ★';
+ else if(gameOverStats.accuracy>=70)medal='★★ SILVER ★★';
+ else if(gameOverStats.accuracy>=50)medal='★★★ BRONZE ★★★';
+ if(medal){
+  ctx.font='bold 24px sans-serif';
+  ctx.fillStyle='#cd7f32';
+  ctx.fillText(medal,W/2,410);
+ }
+
+ ctx.font='22px sans-serif';ctx.fillStyle='#2ecc71';
+ ctx.fillText('Press Enter to Play Again',W/2,500);
+}
+
+function drawPaused(){
+ ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(0,0,W,H);
+ ctx.textAlign='center';
+ ctx.font='bold 48px serif';
+ ctx.fillStyle='#f5e6c8';
+ ctx.fillText('PAUSED',W/2,H/2-20);
+ ctx.font='20px sans-serif';
+ ctx.fillStyle='#ffffff';
+ ctx.fillText('Press Esc or P to resume',W/2,H/2+30);
+}
+
+// ---- POINT-IN-POLYGON ----
+function pointInPolygon(px,py,poly){
+ let inside=false;
+ for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+  const xi=poly[i][0],yi=poly[i][1];
+  const xj=poly[j][0],yj=poly[j][1];
+  if((yi>py)!==(yj>py)&&px<(xj-xi)*(py-yi)/(yj-yi)+xi){
+   inside=!inside;
+  }
+ }
+ return inside;
+}
+
+function findCountryAtPoint(x,y){
+ for(const k of countryKeys){
+  const c=countries[k];
+  if(pointInPolygon(x,y,c.poly))return k;
+ }
+ return null;
+}
+
+// ---- PARTICLES ----
+let particles=[];
+function spawnConfetti(x,y,count){
+ for(let i=0;i<count;i++){
+  const a=Math.random()*Math.PI*2,s=Math.random()*150+30;
+  const colors=['#cd7f32','#2ecc71','#4682b4','#f5e6c8','#e74c3c','#ffcc00'];
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-60,life:1,decay:0.01+Math.random()*0.02,size:3+Math.random()*4,color:colors[Math.floor(Math.random()*colors.length)]});
+ }
+}
+function updateParticles(dt){
+ for(let i=particles.length-1;i>=0;i--){
+  const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=200*dt;
+  p.life-=p.decay;if(p.life<=0)particles.splice(i,1);
+ }
+}
+
+// ---- UPDATE ----
+function updatePlaying(dt){
+ if(flashTimer>0)flashTimer-=dt;
+
+ // Timer countdown
+ if(!showAnswer){
+  timeLeft-=dt;
+  if(timeLeft<=0){
+   timeLeft=0;
+   // Timeout = wrong answer
+   streak=0;lives--;
+   flashTimer=1.0;flashColor='#e74c3c';
+   showAnswer=true;
+   playIncorrect();
+   if(lives<=0){
+    setTimeout(()=>{
+     state='gameover';
+     gameOverStats={score,correctQuestions,totalQuestions,accuracy:totalQuestions>0?Math.round(correctQuestions/totalQuestions*100):0,maxStreak};
+     if(score>highScore){highScore=score;localStorage.setItem('gq_highScore',highScore);}
+     playGameOver();
+    },500);
+   }else{
+    setTimeout(()=>{loadNextQuestion();},1500);
+   }
+  }
+ }
+ updateParticles(dt);
+}
+
+// ---- MAIN LOOP ----
+let lastTime=0;
+
+function gameLoop(timestamp){
+ const dt=Math.min((timestamp-lastTime)/1000,0.05);
+ lastTime=timestamp;
+
+ ctx.save();
+
+ if(state==='title'){
+  drawTitle();
+  if(justPressed('ArrowUp')||justPressed('w')||justPressed('W')){mode=(mode-1+5)%5;}
+  if(justPressed('ArrowDown')||justPressed('s')||justPressed('S')){mode=(mode+1)%5;}
+  if(justPressed('d')||justPressed('D')){diffIdx=(diffIdx+1)%2;}
+  if(justPressed('Enter')||justPressed(' ')){
+   state='playing';
+   score=0;lives=3;streak=0;maxStreak=0;qIndex=0;totalQuestions=0;correctQuestions=0;
+   if(mode===4){
+    questionQueue=generateMarathonQuestions();
+   }else{
+    // Mode-specific question filter
+    const allQs=generateQuestions(100);
+    questionQueue=allQs.filter(q=>{
+     if(mode===0)return q.type==='country';
+     if(mode===1)return q.type==='capital';
+     if(mode===2)return q.type==='landmark';
+     if(mode===3)return q.type==='flag';
+     return true;
+    });
+    // Limit to 20
+    questionQueue=questionQueue.slice(0,20);
+   }
+   qIndex=0;
+   loadNextQuestion();
+   initAudio();
+  }
+  if(mouse.clicked){
+   const my=mouse.y;
+   if(my>=285&&my<465){
+    const idx=Math.floor((my-285)/36);
+    if(idx>=0&&idx<5)mode=idx;
+   }
+   if(my>=495&&my<520){
+    const idx=Math.floor((mouse.x-(W/2-60))/200);
+    if(idx>=0&&idx<2)diffIdx=idx;
+   }
+   if(my>=540&&my<580){
+    state='playing';
+    score=0;lives=3;streak=0;maxStreak=0;qIndex=0;totalQuestions=0;correctQuestions=0;
+    if(mode===4)questionQueue=generateMarathonQuestions();
+    else{
+     const allQs=generateQuestions(100);
+     questionQueue=allQs.filter(q=>{
+      if(mode===0)return q.type==='country';
+      if(mode===1)return q.type==='capital';
+      if(mode===2)return q.type==='landmark';
+      if(mode===3)return q.type==='flag';
+      return true;
+     }).slice(0,20);
+    }
+    qIndex=0;loadNextQuestion();initAudio();
+   }
+   mouse.clicked=false;
+  }
+  for(const k in keys)if(keys[k]===2)keys[k]=1;
+  ctx.restore();
+  requestAnimationFrame(gameLoop);return;
+ }
+
+ if(state==='playing'||state==='paused'){
+  if(paused||justPressed('Escape')||justPressed('p')||justPressed('P')){
+   paused=!paused;
+  }
+  if(paused){
+   drawGame();
+   drawPaused();
+   for(const k in keys)if(keys[k]===2)keys[k]=1;
+   ctx.restore();
+   requestAnimationFrame(gameLoop);return;
+  }
+
+  updatePlaying(dt);
+  drawGame();
+
+  // Draw particles
+  for(const p of particles){
+   ctx.globalAlpha=p.life;
+   ctx.fillStyle=p.color;
+   ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+  }
+  ctx.globalAlpha=1;
+
+  // Click handling
+  if(mouse.prevClicked&&!showAnswer){
+   const rk=findCountryAtPoint(mouse.x,mouse.y);
+   if(rk){
+    checkClick(rk);
+    if(flashColor==='#2ecc71'){
+     spawnConfetti(mouse.x,mouse.y,20);
+    }
+   }
+   mouse.prevClicked=false;
+  }
+ }
+
+ if(state==='gameover'){
+  drawGameOver();
+  updateParticles(dt);
+  for(const p of particles){
+   ctx.globalAlpha=p.life;
+   ctx.fillStyle=p.color;
+   ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+  }
+  ctx.globalAlpha=1;
+  if(justPressed('Enter')||justPressed(' ')){state='title';}
+  if(mouse.clicked&&mouse.y>470&&mouse.y<530){state='title';mouse.clicked=false;}
+ }
+
+ for(const k in keys)if(keys[k]===2)keys[k]=1;
+ if(mouse.clicked)mouse.clicked=false;
+
+ ctx.restore();
+ requestAnimationFrame(gameLoop);
+}
+
+// Handle resize
+function resizeCanvas(){
+ const container=document.getElementById('gameContainer');
+ const scale=Math.min(container.clientWidth/W,container.clientHeight/H);
+ canvas.style.width=(W*scale)+'px';canvas.style.height=(H*scale)+'px';
+}
+window.addEventListener('resize',resizeCanvas);
+resizeCanvas();
+
+requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>

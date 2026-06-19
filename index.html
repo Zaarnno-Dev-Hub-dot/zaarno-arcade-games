@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arcade — Free Flixx</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0d0d0d;
+    color: #fff;
+    min-height: 100vh;
+    padding: 2rem;
+  }
+  h1 { font-size: 2rem; margin-bottom: 0.3rem; color: #e50914; }
+  .subtitle { color: #888; margin-bottom: 2rem; font-size: 0.9rem; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.2rem;
+  }
+  .card {
+    background: linear-gradient(145deg, #1a1a1a, #222);
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 2rem 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .card:hover {
+    border-color: #e50914;
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(229,9,20,0.15);
+  }
+  .icon { font-size: 3rem; margin-bottom: 1rem; }
+  .title { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.5rem; }
+  .desc { color: #888; font-size: 0.85rem; line-height: 1.5; }
+  .play-btn {
+    margin-top: 1.2rem;
+    background: #e50914;
+    color: white;
+    border: none;
+    padding: 0.6rem 2rem;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .card:hover .play-btn { background: #f40612; }
+  .nav-bar {
+    display: flex; gap: 1rem; margin-bottom: 2rem;
+  }
+  .nav-bar a {
+    color: #888; text-decoration: none; font-size: 0.9rem;
+    padding: 0.3rem 0; border-bottom: 2px solid transparent;
+  }
+  .nav-bar a:hover { color: #fff; border-color: #e50914; }
+  .nav-bar a.active { color: #fff; border-color: #e50914; }
+</style>
+</head>
+<body>
+  <div class="nav-bar">
+    <a href="https://zaarno-free-flixx.vercel.app" target="_blank" rel="noopener">🎥 Free Flixx</a>
+    <a href="/" class="active">🎮 Arcade</a>
+    <a href="arena.html">🤖 AI Arena</a>
+  </div>
+  <h1>🎮 Arcade</h1>
+  <p class="subtitle">Games and tools — right from your browser, zero setup</p>
+  <div class="grid">
+    <a class="card" href="math-blaster.html">
+      <div class="icon">🔢</div>
+      <div class="title">Math Blaster</div>
+      <div class="desc">Arcade-style math facts game. Solve equations before time runs out!</div>
+      <span class="play-btn">▶ Play</span>
+    </a>
+    <a class="card" href="spelling-bee.html">
+      <div class="icon">🐝</div>
+      <div class="title">Spelling Bee</div>
+      <div class="desc">Listen, type, and master your spelling skills. Fun for all ages!</div>
+      <span class="play-btn">▶ Play</span>
+    </a>
+    <a class="card" href="geoquest.html">
+      <div class="icon">🌍</div>
+      <div class="title">GeoQuest</div>
+      <div class="desc">Geography quizzes — explore continents, capitals, flags, and more!</div>
+      <span class="play-btn">▶ Play</span>
+    </a>
+    <a class="card" href="mario-typing.html">
+      <div class="icon">🍄</div>
+      <div class="title">Mario Typing Game</div>
+      <div class="desc">Type your way through a Mario-inspired typing adventure!</div>
+      <span class="play-btn">▶ Play</span>
+    </a>
+    <a class="card" href="atlantic-crossing.html">
+      <div class="icon">⛵</div>
+      <div class="title">Atlantic Crossing</div>
+      <div class="desc">Historical simulation game — cross the Atlantic like the early settlers.</div>
+      <span class="play-btn">▶ Play</span>
+    </a>
+  </div>
+</body>
+</html>

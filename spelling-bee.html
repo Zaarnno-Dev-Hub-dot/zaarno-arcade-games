@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spelling Bee</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#2a1f10}
+#gameContainer{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+canvas{background:#ffd700;display:block;max-width:100vw;max-height:100vh;object-fit:contain;cursor:default}
+</style>
+</head>
+<body>
+<div id="gameContainer"><canvas id="gc" width="960" height="640"></canvas></div>
+<script>
+(function(){
+"use strict";
+
+const canvas=document.getElementById('gc');
+const ctx=canvas.getContext('2d');
+const W=960,H=640;
+
+// ---- AUDIO ----
+let audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();}
+function playTone(f,d,t,v){try{initAudio();const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=t||'sine';o.frequency.setValueAtTime(f,audioCtx.currentTime);g.gain.setValueAtTime(v||0.3,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);}catch(e){}}
+function playCorrect(){playTone(523,0.12,'sine',0.25);setTimeout(()=>playTone(659,0.12,'sine',0.25),100);setTimeout(()=>playTone(784,0.18,'sine',0.25),200);}
+function playIncorrect(){playTone(200,0.3,'sawtooth',0.2);}
+function playLevelUp(){[523,587,659,698,784].forEach((f,i)=>setTimeout(()=>playTone(f,0.1,'sine',0.2),i*70));}
+function playGameOver(){playTone(300,0.3,'sawtooth',0.25);setTimeout(()=>playTone(220,0.4,'sawtooth',0.25),300);setTimeout(()=>playTone(150,0.6,'sawtooth',0.2),600);}
+function playHint(){playTone(880,0.1,'triangle',0.15);}
+
+// ---- INPUT ----
+const keys={},mouse={x:0,y:0,clicked:false};
+document.addEventListener('keydown',e=>{
+  if (e.key.toLowerCase() === 'p' && state === 'playing') {
+    paused = !paused;
+    return;
+  }
+  if(!keys[e.key]||keys[e.key]===0) keys[e.key]=2;
+  e.preventDefault();
+});
+document.addEventListener('keyup',e=>{keys[e.key]=0;e.preventDefault();});
+canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();mouse.x=(e.clientX-r.left)*(W/r.width);mouse.y=(e.clientY-r.top)*(H/r.height);});
+canvas.addEventListener('mousedown',e=>{mouse.clicked=true;initAudio();});
+canvas.addEventListener('mouseup',()=>{mouse.clicked=false;});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='playing'){state='paused';}});
+function justPressed(k){return keys[k]===2;}
+
+// ---- WORD BANK (500+ words, 4 tiers) ----
+const wordBank={
+ tier1:[
+  {word:'cat',hint:'A furry pet that purrs'},{word:'dog',hint:'Man\'s best friend'},{word:'run',hint:'To move fast on foot'},{word:'big',hint:'Large in size'},{word:'red',hint:'Color of fire trucks'},{word:'hat',hint:'Worn on your head'},{word:'sun',hint:'The star in our sky'},{word:'bed',hint:'Where you sleep'},{word:'cup',hint:'For drinking liquids'},{word:'pen',hint:'Writes with ink'},{word:'bus',hint:'A large vehicle for passengers'},{word:'fish',hint:'Swims in water'},{word:'tree',hint:'Has leaves and branches'},{word:'book',hint:'You read this'},{word:'star',hint:'Twinkles in the night sky'},{word:'milk',hint:'White drink from cows'},{word:'bird',hint:'Has wings and flies'},{word:'door',hint:'You open this to enter'},{word:'bell',hint:'Makes a ringing sound'},{word:'kite',hint:'Flies high on a windy day'},{word:'rain',hint:'Water falling from clouds'},{word:'frog',hint:'A green animal that hops'},{word:'hand',hint:'At the end of your arm'},{word:'cake',hint:'A sweet dessert for birthdays'},{word:'duck',hint:'A bird that quacks'},{word:'flag',hint:'A symbol of a country'},{word:'nest',hint:'A bird\'s home'},{word:'ball',hint:'Round toy you throw'},{word:'sand',hint:'Found at the beach'},{word:'lamp',hint:'Provides light'},{word:'desk',hint:'A table for writing'},{word:'frog',hint:'Green amphibian that hops'},{word:'drum',hint:'Musical instrument you hit'},{word:'sock',hint:'Worn on your foot'},{word:'moon',hint:'Orbits the Earth at night'},{word:'star',hint:'Shines in the night sky'},{word:'tent',hint:'Used for camping'},{word:'wind',hint:'Moving air you feel'},{word:'king',hint:'Male ruler of a kingdom'},{word:'ring',hint:'Worn on your finger'},{word:'wing',hint:'Birds use these to fly'},{word:'jump',hint:'To push off the ground'},{word:'swim',hint:'Moving through water'},{word:'play',hint:'Having fun with toys'},{word:'sing',hint:'To make music with your voice'},{word:'read',hint:'Looking at words in a book'},{word:'cook',hint:'To prepare food'},{word:'help',hint:'To assist someone'},{word:'open',hint:'To move something aside'},{word:'fast',hint:'Quick speed'},{word:'slow',hint:'Not fast'},{word:'cold',hint:'Low temperature'},{word:'warm',hint:'Comfortable temperature'},{word:'tall',hint:'Above average height'},{word:'long',hint:'Extended length'},{word:'soft',hint:'Gentle to touch'},{word:'hard',hint:'Firm and solid'},{word:'good',hint:'Pleasing quality'},{word:'more',hint:'Additional amount'},{word:'here',hint:'At this place'},{word:'down',hint:'Opposite of up'},{word:'left',hint:'Opposite of right'},{word:'back',hint:'The rear side'},{word:'home',hint:'Where you live'},{word:'door',hint:'Entry to a room'},{word:'room',hint:'A space in a house'},{word:'food',hint:'What you eat'},{word:'milk',hint:'White beverage'},{word:'eggs',hint:'Laid by chickens'},{word:'fish',hint:'Swims in the sea'},{word:'meat',hint:'Food from animals'},{word:'soup',hint:'Hot liquid food'},{word:'corn',hint:'Yellow vegetable on a cob'},{word:'bean',hint:'A legume'},{word:'peas',hint:'Small green vegetables'},{word:'rice',hint:'A grain eaten with meals'},{word:'trip',hint:'A journey'},{word:'boat',hint:'Travels on water'},{word:'road',hint:'Cars drive on this'},{word:'hill',hint:'A small mountain'},{word:'lake',hint:'A body of water'},{word:'park',hint:'A place with grass and trees'},{word:'shop',hint:'A place to buy things'},{word:'bank',hint:'Where money is kept'},{word:'baby',hint:'A very young child'},{word:'twin',hint:'One of two born together'},{word:'gold',hint:'A precious yellow metal'},{word:'bell',hint:'Makes a ringing sound'},{word:'lock',hint:'Keeps things secure'},{word:'chip',hint:'A thin slice'},{word:'drop',hint:'A small amount of liquid'},{word:'edge',hint:'The outer border'},{word:'fact',hint:'Something that is true'},{word:'gift',hint:'Something given freely'},{word:'half',hint:'One of two equal parts'},{word:'idea',hint:'A thought or plan'},{word:'joke',hint:'Something funny'},{word:'kick',hint:'To strike with your foot'},{word:'luck',hint:'Good fortune'},{word:'math',hint:'Subject with numbers'},{word:'note',hint:'A brief record'},{word:'pass',hint:'To go by'},{word:'quiz',hint:'A short test'},{word:'rest',hint:'To relax'},{word:'size',hint:'How big something is'},{word:'task',hint:'A piece of work'},{word:'unit',hint:'A single thing'},{word:'vast',hint:'Very large in extent'},{word:'wait',hint:'To stay in place'},{word:'yard',hint:'Area around a house'},{word:'zero',hint:'The number nothing'}
+ ],
+ tier2:[
+  {word:'because',hint:'For the reason that'},{word:'beautiful',hint:'Very pleasing to look at'},{word:'caught',hint:'Captured or trapped'},{word:'elephant',hint:'Largest land animal with a trunk'},{word:'garden',hint:'Where flowers and plants grow'},{word:'happen',hint:'To take place or occur'},{word:'inside',hint:'The inner part'},{word:'kitten',hint:'A young cat'},{word:'letter',hint:'A written message or character'},{word:'monkey',hint:'A playful primate'},{word:'number',hint:'A count or amount'},{word:'orange',hint:'A citrus fruit and color'},{word:'pencil',hint:'Used for writing or drawing'},{word:'queen',hint:'Female ruler'},{word:'rabbit',hint:'A furry animal with long ears'},{word:'sister',hint:'A female sibling'},{word:'table',hint:'A piece of furniture'},{word:'umbrella',hint:'Keeps rain off you'},{word:'valley',hint:'Low land between hills'},{word:'window',hint:'Let\'s light into a room'},{word:'yellow',hint:'The color of bananas'},{word:'zebra',hint:'A black and white striped animal'},{word:'always',hint:'At all times'},{word:'around',hint:'In a circle or nearby'},{word:'better',hint:'Of higher quality'},{word:'bottle',hint:'Container for liquids'},{word:'bridge',hint:'Spans across water'},{word:'broken',hint:'Not working properly'},{word:'basket',hint:'Woven container'},{word:'button',hint:'Fastens clothing'},{word:'candle',hint:'Provides light with a flame'},{word:'center',hint:'The middle point'},{word:'chance',hint:'An opportunity'},{word:'circle',hint:'A round shape'},{word:'cotton',hint:'Soft white fiber for clothing'},{word:'danger',hint:'Risk or harm'},{word:'dinner',hint:'The main meal'},{word:'double',hint:'Twice as much'},{word:'eighth',hint:'Number after seventh'},{word:'engine',hint:'Powers a vehicle'},{word:'enough',hint:'As much as needed'},{word:'expect',hint:'To look forward to'},{word:'family',hint:'Related people'},{word:'finger',hint:'Digit on your hand'},{word:'finish',hint:'To bring to an end'},{word:'flower',hint:'A blooming plant'},{word:'forest',hint:'A large wooded area'},{word:'friend',hint:'A trusted companion'},{word:'gentle',hint:'Soft and kind'},{word:'golden',hint:'Made of or like gold'},{word:'govern',hint:'To rule or lead'},{word:'ground',hint:'The surface of the earth'},{word:'growth',hint:'The process of getting bigger'},{word:'health',hint:'State of being well'},{word:'heaven',hint:'The sky or upper region'},{word:'honest',hint:'Truthful and fair'},{word:'hunter',hint:'One who hunts'},{word:'insect',hint:'A small six-legged creature'},{word:'island',hint:'Land surrounded by water'},{word:'kitten',hint:'A baby cat'},{word:'ladder',hint:'Used to climb up'},{word:'launch',hint:'To send off or start'},{word:'lawyer',hint:'A legal professional'},{word:'leader',hint:'A person who guides'},{word:'lemon',hint:'A sour yellow fruit'},{word:'lesson',hint:'A learning session'},{word:'listen',hint:'To pay attention to sound'},{word:'lovely',hint:'Very nice or beautiful'},{word:'lunch',hint:'Midday meal'},{word:'market',hint:'A place to buy and sell'},{word:'marble',hint:'A hard stone used in sculpture'},{word:'middle',hint:'The center point'},{word:'minute',hint:'60 seconds of time'},{word:'mirror',hint:'Reflects your image'},{word:'mother',hint:'A female parent'},{word:'mountain',hint:'Very high natural land'},{word:'muscle',hint:'Body tissue for movement'},{word:'museum',hint:'Place where exhibits are shown'},{word:'nation',hint:'A country or people'},{word:'nature',hint:'The natural world'},{word:'nephew',hint:'Your sibling\'s son'},{word:'nickel',hint:'A silver-colored coin'},{word:'notebook',hint:'Book for writing notes'},{word:'oxygen',hint:'Gas we breathe to live'},{word:'palace',hint:'A grand residence for royalty'},{word:'pencil',hint:'Writing instrument with lead'},{word:'picnic',hint:'An outdoor meal'},{word:'planet',hint:'A large body in space'},{word:'polish',hint:'To make shiny'},{word:'prefer',hint:'To like more'},{word:'prince',hint:'Son of a monarch'},{word:'prison',hint:'A place for criminals'},{word:'purple',hint:'A color between blue and red'},{word:'puzzle',hint:'A challenging game or problem'},{word:'quarter',hint:'One fourth of something'},{word:'record',hint:'A documented account'},{word:'rescue',hint:'To save from danger'},{word:'rocket',hint:'A vehicle that goes to space'},{word:'rubber',hint:'A stretchy material'},{word:'sailor',hint:'A person who works on a ship'},{word:'sample',hint:'A small part as an example'},{word:'season',hint:'One of four climate periods'},{word:'second',hint:'The next after first'},{word:'silver',hint:'A shiny gray metal'},{word:'sketch',hint:'A quick drawing'},{word:'soccer',hint:'A sport played with a ball'},{word:'spider',hint:'An eight-legged arachnid'},{word:'square',hint:'A shape with four equal sides'},{word:'stripe',hint:'A long narrow band'},{word:'summer',hint:'The warmest season'},{word:'survive',hint:'To stay alive'},{word:'swallow',hint:'To take in through the throat'},{word:'temple',hint:'A place of worship'},{word:'thirst',hint:'Desire for a drink'},{word:'ticket',hint:'A pass for entry'},{word:'travel',hint:'To go on a journey'},{word:'tunnel',hint:'A passage underground'},{word:'useful',hint:'Having a good purpose'},{word:'vacuum',hint:'Cleans by sucking dirt'},{word:'valley',hint:'Low area between hills'},{word:'victim',hint:'A person who is harmed'},{word:'violet',hint:'A purple flower'},{word:'volume',hint:'The amount of space'},{word:'wallet',hint:'Holds money and cards'},{word:'winter',hint:'The coldest season'},{word:'wonder',hint:'To be curious about'},{word:'woolen',hint:'Made of wool'},{word:'yellow',hint:'A bright primary color'},{word:'young',hint:'In early life'},{word:'advice',hint:'A helpful suggestion'}
+ ],
+ tier3:[
+  {word:'accommodation',hint:'A place to stay or live'},{word:'exaggerate',hint:'To overstate the truth'},{word:'necessary',hint:'Something essential'},{word:'parallel',hint:'Running side by side forever'},{word:'occasionally',hint:'Sometimes, not often'},{word:'immediately',hint:'Without any delay'},{word:'practically',hint:'Almost but not quite'},{word:'responsible',hint:'Trusted to do what is right'},{word:'temperature',hint:'How hot or cold it is'},{word:'vegetable',hint:'An edible plant'},{word:'agriculture',hint:'Farming and growing crops'},{word:'apologize',hint:'To say you are sorry'},{word:'appearance',hint:'The way something looks'},{word:'appreciate',hint:'To recognize value'},{word:'atmosphere',hint:'The air around Earth'},{word:'bargain',hint:'A good deal or agreement'},{word:'boundary',hint:'A dividing line'},{word:'brilliant',hint:'Very bright or clever'},{word:'calculate',hint:'To figure out mathematically'},{word:'calendar',hint:'Shows days and months'},{word:'campaign',hint:'A series of actions for a goal'},{word:'candidate',hint:'A person seeking a position'},{word:'category',hint:'A class or group'},{word:'celebrate',hint:'To mark an occasion with joy'},{word:'challenge',hint:'A difficult task to overcome'},{word:'character',hint:'A person in a story'},{word:'committee',hint:'A group assigned to a task'},{word:'companion',hint:'A person who accompanies'},{word:'complaint',hint:'Expression of dissatisfaction'},{word:'concentrate',hint:'To focus your attention'},{word:'confident',hint:'Sure of oneself'},{word:'conscious',hint:'Aware and awake'},{word:'consequence',hint:'A result of an action'},{word:'consider',hint:'To think about carefully'},{word:'constitute',hint:'To make up or form'},{word:'continent',hint:'A large landmass'},{word:'contribute',hint:'To give or provide'},{word:'convenient',hint:'Easy and suitable'},{word:'correspond',hint:'To match or exchange letters'},{word:'courageous',hint:'Brave and fearless'},{word:'curriculum',hint:'Course of study'},{word:'definitely',hint:'Without doubt'},{word:'democracy',hint:'Government by the people'},{word:'desperate',hint:'Extreme need or urgency'},{word:'determine',hint:'To decide or find out'},{word:'develop',hint:'To grow or improve'},{word:'dictionary',hint:'A book of word definitions'},{word:'difficulty',hint:'Something hard to do'},{word:'disappear',hint:'To vanish from sight'},{word:'discipline',hint:'Controlled behavior'},{word:'discussion',hint:'A talk about a topic'},{word:'distinguish',hint:'To tell apart'},{word:'efficiency',hint:'Productive use of resources'},{word:'electricity',hint:'Energy that powers devices'},{word:'embarrass',hint:'To make feel self-conscious'},{word:'emphasize',hint:'To give special importance'},{word:'encourage',hint:'To give support and hope'},{word:'enormous',hint:'Extremely large'},{word:'environment',hint:'Surroundings and conditions'},{word:'equipment',hint:'Tools needed for a task'},{word:'especially',hint:'Particularly or notably'},{word:'establish',hint:'To set up firmly'},{word:'eventually',hint:'At some later time'},{word:'excellent',hint:'Extremely good'},{word:'experience',hint:'Knowledge from doing'},{word:'experiment',hint:'A test to discover something'},{word:'explanation',hint:'A clarifying statement'},{word:'expression',hint:'A way of showing feeling'},{word:'familiar',hint:'Well known'},{word:'fascinate',hint:'To attract interest strongly'},{word:'fortunate',hint:'Lucky and blessed'},{word:'frequently',hint:'Often or regularly'},{word:'generous',hint:'Willing to give freely'},{word:'guarantee',hint:'A promise of quality'},{word:'hesitate',hint:'To pause before acting'},{word:'hypocrite',hint:'Someone who says but doesn\'t do'},{word:'ignorance',hint:'Lack of knowledge'},{word:'illustrate',hint:'To explain with examples'},{word:'impatient',hint:'Not willing to wait'},{word:'impressive',hint:'Deserving admiration'},{word:'incredible',hint:'Hard to believe'},{word:'independent',hint:'Free from outside control'},{word:'indicate',hint:'To point out or show'},{word:'influence',hint:'The power to affect'},{word:'information',hint:'Facts and data'},{word:'instructor',hint:'A teacher or trainer'},{word:'intelligent',hint:'Smart and bright'},{word:'interfere',hint:'To get in the way'},{word:'interpret',hint:'To explain meaning'},{word:'interrupt',hint:'To break in on someone'},{word:'introduce',hint:'To present someone new'},{word:'investigate',hint:'To examine carefully'},{word:'involve',hint:'To include as a part'},{word:'jealousy',hint:'Envy of others'},{word:'knowledge',hint:'What you know'},{word:'laboratory',hint:'A place for experiments'},{word:'legislature',hint:'Law-making body'},{word:'legitimate',hint:'Lawful and valid'},{word:'literature',hint:'Written works of value'},{word:'magnificent',hint:'Grand and impressive'},{word:'maintenance',hint:'Keeping in good condition'},{word:'mathematics',hint:'The study of numbers'},{word:'mischievous',hint:'Playfully naughty'},{word:'misspell',hint:'To spell incorrectly'},{word:'mysterious',hint:'Hard to understand'},{word:'narrative',hint:'A spoken or written story'},{word:'nervous',hint:'Worried or anxious'},{word:'nevertheless',hint:'In spite of that'},{word:'noticeable',hint:'Easy to see'},{word:'nuisance',hint:'An annoying thing'},{word:'obedience',hint:'Following rules'},{word:'obviously',hint:'Clearly visible'},{word:'occasional',hint:'Happening sometimes'},{word:'opportunity',hint:'A favorable chance'},{word:'orchestra',hint:'A group of musicians'},{word:'original',hint:'First of its kind'},{word:'paragraph',hint:'A group of sentences'},{word:'particular',hint:'Specific and distinct'},{word:'passenger',hint:'A rider in a vehicle'},{word:'patience',hint:'Ability to wait calmly'},{word:'peculiar',hint:'Strange or odd'},{word:'permanent',hint:'Lasting forever'},{word:'permission',hint:'Consent or authorization'},{word:'persuade',hint:'To convince someone'},{word:'phenomenon',hint:'An observable event'},{word:'physician',hint:'A medical doctor'},{word:'politician',hint:'A person in government'},{word:'population',hint:'The number of inhabitants'},{word:'possess',hint:'To own or have'},{word:'practical',hint:'Useful and realistic'},{word:'preference',hint:'What you like more'},{word:'prejudice',hint:'Preconceived opinion'},{word:'prescription',hint:'A doctor\'s order for medicine'},{word:'prestige',hint:'High reputation'},{word:'privilege',hint:'A special advantage'},{word:'procedure',hint:'A way of doing things'},{word:'profession',hint:'A job requiring training'},{word:'prominent',hint:'Well-known and important'},{word:'psychology',hint:'Study of the mind'},{word:'publicity',hint:'Public attention'},{word:'punctual',hint:'On time'},{word:'qualified',hint:'Having the right skills'},{word:'recognize',hint:'To identify from memory'},{word:'recommend',hint:'To suggest as good'},{word:'reference',hint:'A source of information'},{word:'religious',hint:'Relating to faith'},{word:'repetition',hint:'Doing something again'},{word:'represent',hint:'To stand for'},{word:'reputation',hint:'What people think of you'},{word:'restaurant',hint:'A place to eat meals'},{word:'sacrifice',hint:'To give up something'},{word:'satisfy',hint:'To meet expectations'},{word:'schedule',hint:'A plan of events'},{word:'secretary',hint:'An administrative assistant'},{word:'sensitive',hint:'Easily affected'},{word:'separate',hint:'Set apart from others'},{word:'significant',hint:'Important and meaningful'},{word:'souvenir',hint:'A keepsake from travel'},{word:'strenuous',hint:'Needing great effort'},{word:'structure',hint:'The arrangement of parts'},{word:'substance',hint:'A particular kind of matter'},{word:'substitute',hint:'A replacement'},{word:'sufficient',hint:'Enough to meet need'},{word:'suggestion',hint:'An idea offered'},{word:'superior',hint:'Higher in quality'},{word:'sympathy',hint:'Feeling for others'},{word:'technique',hint:'A method of doing something'},{word:'technology',hint:'Application of science'},{word:'temperature',hint:'Degree of heat'},{word:'temporary',hint:'Lasting only a while'},{word:'territory',hint:'An area of land'},{word:'therefore',hint:'For that reason'},{word:'thorough',hint:'Complete and detailed'},{word:'tradition',hint:'A custom handed down'},{word:'transparent',hint:'Clear as glass'},{word:'treasure',hint:'Valuable items'},{word:'tremendous',hint:'Very great in size'},{word:'unanimous',hint:'Fully in agreement'},{word:'uncertain',hint:'Not sure'},{word:'underestimate',hint:'To value too low'},{word:'unfortunate',hint:'Having bad luck'},{word:'university',hint:'A higher education school'},{word:'unnecessary',hint:'Not needed'},{word:'voluntary',hint:'Done by choice'},{word:'wilderness',hint:'Untouched natural area'}
+ ],
+ tier4:[
+  {word:'ubiquitous',hint:'Found everywhere'},{word:'onomatopoeia',hint:'A word that sounds like its meaning'},{word:'entrepreneur',hint:'A business starter'},{word:'bureaucracy',hint:'Government by many officials'},{word:'unprecedented',hint:'Never done before'},{word:'sophisticated',hint:'Refined and complex'},{word:'idiosyncrasy',hint:'A peculiar personal trait'},{word:'quintessential',hint:'The perfect example'},{word:'philanthropy',hint:'Helping others through donations'},{word:'camouflage',hint:'Hidden by disguise'},{word:'catastrophe',hint:'A great disaster'},{word:'circumstantial',hint:'Based on circumstances'},{word:'conscientious',hint:'Thorough and careful'},{word:'conspicuous',hint:'Easy to notice'},{word:'controversy',hint:'A public disagreement'},{word:'deleterious',hint:'Harmful and damaging'},{word:'deteriorate',hint:'To become worse'},{word:'dilettante',hint:'A person with shallow interest'},{word:'discernible',hint:'Able to be perceived'},{word:'discrimination',hint:'Unfair treatment based on group'},{word:'eccentricity',hint:'Unconventional behavior'},{word:'elaborate',hint:'Detailed and complex'},{word:'eloquent',hint:'Fluent and persuasive'},{word:'emancipate',hint:'To set free'},{word:'embellish',hint:'To decorate or exaggerate'},{word:'encyclopedia',hint:'A reference book of knowledge'},{word:'entrepreneur',hint:'Someone who starts businesses'},{word:'equilibrium',hint:'A state of balance'},{word:'equivocate',hint:'To be deliberately vague'},{word:'etymology',hint:'Study of word origins'},{word:'exacerbate',hint:'To make worse'},{word:'exhilarate',hint:'To make very happy'},{word:'existential',hint:'Relating to existence'},{word:'extraordinary',hint:'Very unusual or remarkable'},{word:'extravagant',hint:'Spending too much'},{word:'facetious',hint:'Not serious inappropriately'},{word:'fluorescent',hint:'Glowing with light'},{word:'formidable',hint:'Inspiring fear or respect'},{word:'gingerly',hint:'With great care'},{word:'grandiloquent',hint:'Pompous in language'},{word:'gratuitous',hint:'Unnecessary and uncalled for'},{word:'gubernatorial',hint:'Relating to a governor'},{word:'hierarchy',hint:'A ranking system'},{word:'hypothetical',hint:'Based on assumption'},{word:'idiosyncrasy',hint:'A unique personal quirk'},{word:'illuminate',hint:'To light up or clarify'},{word:'immaculate',hint:'Perfectly clean'},{word:'impeccable',hint:'Without flaws'},{word:'implausible',hint:'Not believable'},{word:'improvise',hint:'To make up on the spot'},{word:'inadvertent',hint:'Not on purpose'},{word:'incomprehensible',hint:'Impossible to understand'},{word:'incorrigible',hint:'Unable to be corrected'},{word:'indefatigable',hint:'Never getting tired'},{word:'indigenous',hint:'Native to a place'},{word:'indispensable',hint:'Absolutely necessary'},{word:'ineffable',hint:'Too great to describe'},{word:'inevitable',hint:'Certain to happen'},{word:'infinitesimal',hint:'Extremely tiny'},{word:'infrastructure',hint:'Basic physical systems of society'},{word:'innocuous',hint:'Harmless'},{word:'inscrutable',hint:'Mysterious and hard to read'},{word:'insidious',hint:'Slowly harmful'},{word:'intellectual',hint:'Using the mind'},{word:'intermittent',hint:'Stopping and starting'},{word:'iridescent',hint:'Shifting rainbow colors'},{word:'irrelevant',hint:'Not related'},{word:'jeopardize',hint:'To put at risk'},{word:'juxtaposition',hint:'Placing side by side for contrast'},{word:'kaleidoscope',hint:'A changing pattern of colors'},{word:'labyrinth',hint:'A complex maze'},{word:'laconic',hint:'Using few words'},{word:'legitimacy',hint:'Being lawful'},{word:'lightning',hint:'An electric flash in the sky'},{word:'magnanimous',hint:'Generous and forgiving'},{word:'maladroit',hint:'Clumsy and awkward'},{word:'malfeasance',hint:'Wrongdoing by an official'},{word:'melancholy',hint:'A deep sadness'},{word:'metamorphosis',hint:'A complete transformation'},{word:'meticulous',hint:'Very careful and precise'},{word:'mischievous',hint:'Playfully causing trouble'},{word:'misnomer',hint:'An incorrect name'},{word:'necessitate',hint:'To make necessary'},{word:'nefarious',hint:'Wickedly evil'},{word:'negotiate',hint:'To discuss to reach agreement'},{word:'nevertheless',hint:'In spite of'},{word:'nonchalant',hint:'Casually unconcerned'},{word:'notorious',hint:'Famous for bad reasons'},{word:'obsequious',hint:'Excessively obedient'},{word:'obsolete',hint:'Out of date'},{word:'obstinate',hint:'Stubbornly persistent'},{word:'ominous',hint:'Threatening and menacing'},{word:'ostentatious',hint:'Designed to impress'},{word:'paleontology',hint:'Study of fossils'},{word:'panacea',hint:'A cure-all solution'},{word:'paradigm',hint:'A typical example or model'},{word:'paraphernalia',hint:'Many small belongings'},{word:'picturesque',hint:'Visually attractive'},{word:'plagiarism',hint:'Copying others\' work'},{word:'platitude',hint:'A boring, overused statement'},{word:'plausible',hint:'Seemingly reasonable'},{word:'predicament',hint:'A difficult situation'},{word:'preliminary',hint:'Before the main event'},{word:'presumptuous',hint:'Too bold and forward'},{word:'procrastinate',hint:'To delay doing things'},{word:'prolific',hint:'Highly productive'},{word:'propaganda',hint:'Spreading biased information'},{word:'prosperity',hint:'Wealth and success'},{word:'pseudonym',hint:'A false name'},{word:'psychology',hint:'Study of the mind'},{word:'pugnacious',hint:'Eager to fight'},{word:'recalcitrant',hint:'Stubbornly disobedient'},{word:'reciprocate',hint:'To return in kind'},{word:'reconnaissance',hint:'Exploring to gather info'},{word:'rehabilitate',hint:'To restore to good condition'},{word:'rejuvenate',hint:'To make youthful again'},{word:'remuneration',hint:'Payment for work'},{word:'renaissance',hint:'A rebirth or revival'},{word:'rendezvous',hint:'A planned meeting'},{word:'repercussion',hint:'An unintended consequence'},{word:'replenish',hint:'To fill up again'},{word:'reprehensible',hint:'Deserving blame'},{word:'reproach',hint:'To express disappointment'},{word:'resilient',hint:'Able to recover quickly'},{word:'restaurant',hint:'A place to dine'},{word:'reverberate',hint:'To echo repeatedly'},{word:'rhetorical',hint:'Meant for effect, not answer'},{word:'sacrilege',hint:'Disrespect to sacred things'},{word:'sanctuary',hint:'A safe, holy place'},{word:'scintillate',hint:'To sparkle or shine'},{word:'serendipity',hint:'Happy accidental discovery'},{word:'silhouette',hint:'A dark outline'},{word:'simultaneous',hint:'Happening at the same time'},{word:'solicitous',hint:'Anxious to help'},{word:'spontaneous',hint:'Happening without planning'},{word:'subterranean',hint:'Underground'},{word:'superfluous',hint:'More than needed'},{word:'surreptitious',hint:'Kept secret or stealthy'},{word:'susceptible',hint:'Easily influenced'},{word:'sycophant',hint:'A flattering person'},{word:'synthesize',hint:'To combine into a whole'},{word:'tachometer',hint:'Measures engine speed'},{word:'tentative',hint:'Not final or certain'},{word:'terminology',hint:'Special terms of a field'},{word:'therapeutic',hint:'Healing and soothing'},{word:'ubiquitous',hint:'Present everywhere'},{word:'ulterior',hint:'Hidden or secret'},{word:'unanimous',hint:'In complete agreement'},{word:'unconscionable',hint:'Outrageously unfair'},{word:'underestimate',hint:'To judge too low'},{word:'unequivocal',hint:'Leaving no doubt'},{word:'unprecedented',hint:'Never done before'},{word:'vainglorious',hint:'Excessively proud'},{word:'vehement',hint:'Intense and passionate'},{word:'vernacular',hint:'Everyday language'},{word:'vicarious',hint:'Experienced through others'},{word:'vindictive',hint:'Seeking revenge'},{word:'vociferous',hint:'Loud and forceful'},{word:'whimsical',hint:'Playfully odd'},{word:'xenophobia',hint:'Fear of foreigners'},{word:'yesterday',hint:'The day before today'},{word:'zeppelin',hint:'A large airship'}
+ ]
+};
+
+// Build full tier lookup
+const allTiers={1:wordBank.tier1,2:wordBank.tier2,3:wordBank.tier3,4:wordBank.tier4};
+
+function getWordsForTier(tier){
+ // tier: 'easy'=>1, 'medium'=>2, 'hard'=>3, 'expert'=>4
+ const t={easy:1,medium:2,hard:3,expert:4}[tier]||1;
+ // Return merged tiers up to this level
+ let words=[];
+ for(let i=1;i<=t;i++)words=words.concat(allTiers[i]);
+ return words;
+}
+
+// ---- GAME STATE ----
+let state='title';
+let score=0,highScore=parseInt(localStorage.getItem('sb_highScore'))||0;
+let lives=3,streak=0,maxStreak=0,totalWords=0,correctWords=0;
+let mode=0; // 0=see-spell,1=hear-spell,2=def-clues,3=speed-spell,4=jumble
+const modeNames=['See & Spell','Hear & Spell','Definition Clues','Speed Spell','Jumble Rescue'];
+let diffIdx=0;
+const diffNames=['Easy','Medium','Hard','Expert'];
+let currentWord=null,currentEntry=null,inputBuffer='',hintUsed=false;
+let wordQueue=[],wordIdx=0;
+let flashTimer=0,flashColor='';
+let speedTimer=0,speedTimeLeft=60;
+let jumbleLetters=[];
+let showWordTimer=0;
+let showWordPhase=false;
+let paused=false;
+let gameOverStats={};
+
+// ---- PARTICLES ----
+let particles=[];
+function spawnConfetti(x,y,count){
+ for(let i=0;i<count;i++){
+  const a=Math.random()*Math.PI*2,s=Math.random()*200+50;
+  const colors=['#ffd700','#7cb342','#66bb6a','#ef5350','#ffcc00','#ff8800'];
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-80,life:1,decay:0.008+Math.random()*0.015,size:3+Math.random()*5,color:colors[Math.floor(Math.random()*colors.length)]});
+ }
+}
+function updateParticles(dt){
+ for(let i=particles.length-1;i>=0;i--){
+  const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=300*dt;
+  p.life-=p.decay;if(p.life<=0)particles.splice(i,1);
+ }
+}
+
+// ---- HELPERS ----
+function shuffleArray(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+
+function prepareGame(){
+ const words=getWordsForTier(diffNames[diffIdx].toLowerCase());
+ wordQueue=shuffleArray([...words]);
+ wordIdx=0;
+ score=0;lives=3;streak=0;maxStreak=0;totalWords=0;correctWords=0;
+ inputBuffer='';hintUsed=false;flashTimer=0;
+ speedTimeLeft=60;speedTimer=0;
+ loadNextWord();
+}
+
+function loadNextWord(){
+ if(wordIdx>=wordQueue.length){
+  wordQueue=shuffleArray([...wordQueue]);
+  wordIdx=0;
+ }
+ currentEntry=wordQueue[wordIdx++];
+ currentWord=currentEntry.word;
+ inputBuffer='';hintUsed=false;showWordPhase=false;showWordTimer=2;
+ if(mode===4){
+  jumbleLetters=shuffleArray(currentWord.split(''));
+ }
+ if(mode===0){
+  showWordPhase=true;showWordTimer=3;
+ }
+}
+
+function checkSpelling(){
+ const guess=inputBuffer.trim().toLowerCase();
+ const correct=currentWord.toLowerCase();
+ const isCorrect=guess===correct;
+ totalWords++;
+
+ if(isCorrect){
+  streak++;correctWords++;
+  if(streak>maxStreak)maxStreak=streak;
+  const mult=Math.min(streak,10);
+  let pts=Math.round(100*(currentWord.length/3)*mult);
+  if(hintUsed)pts=Math.round(pts/2);
+  if(mode===3)pts+=Math.round(speedTimeLeft*50);
+  score+=pts;
+  flashTimer=0.4;flashColor='#66bb6a';
+  spawnConfetti(W/2,250,30);
+  playCorrect();
+ }else{
+  streak=0;lives--;
+  flashTimer=0.4;flashColor='#ef5350';
+  playIncorrect();
+  if(lives<=0){
+   state='gameover';
+   gameOverStats={score,correctWords,totalWords,accuracy:totalWords>0?Math.round(correctWords/totalWords*100):0,maxStreak};
+   if(score>highScore){highScore=score;localStorage.setItem('sb_highScore',highScore);}
+   playGameOver();
+   return;
+  }
+ }
+ loadNextWord();
+}
+
+// ---- RENDER ----
+function drawHexBackground(){
+ ctx.fillStyle='#ffd700';ctx.fillRect(0,0,W,H);
+ // Draw honeycomb pattern
+ ctx.strokeStyle='#c7950e';ctx.lineWidth=1;
+ const hexSize=40;
+ for(let row=-1;row<Math.ceil(H/hexSize/1.5)+2;row++){
+  for(let col=-1;col<Math.ceil(W/hexSize/1.8)+2;col++){
+   const x=col*hexSize*1.8+(row%2)*hexSize*0.9;
+   const y=row*hexSize*1.5;
+   ctx.beginPath();
+   for(let i=0;i<6;i++){
+    const angle=Math.PI/3*i-Math.PI/6;
+    const px=x+hexSize*Math.cos(angle);
+    const py=y+hexSize*Math.sin(angle);
+    if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);
+   }
+   ctx.closePath();ctx.stroke();
+  }
+ }
+}
+
+function drawTitle(){
+ drawHexBackground();
+
+ ctx.textAlign='center';
+ ctx.shadowColor='#3d2b1f';ctx.shadowBlur=15;
+ ctx.font='bold 64px sans-serif';
+ ctx.fillStyle='#3d2b1f';
+ ctx.fillText('Spelling Bee',W/2,150);
+ ctx.shadowBlur=0;
+
+ // Bee icon
+ ctx.font='48px sans-serif';
+ ctx.fillText('🐝',W/2,210);
+
+ ctx.font='18px sans-serif';ctx.fillStyle='#3d2b1f';
+ ctx.fillText('Master your spelling skills!',W/2,250);
+
+ // Modes
+ for(let i=0;i<5;i++){
+  const y=285+i*38;
+  ctx.font='20px sans-serif';
+  ctx.fillStyle=i===mode?'#7cb342':'#5c4033';
+  ctx.fillText((i===mode?'✦ ':'  ')+modeNames[i],W/2-200,y);
+ }
+
+ // Difficulty
+ ctx.font='18px sans-serif';ctx.fillStyle='#3d2b1f';
+ ctx.fillText('Difficulty:',W/2-200,500);
+ for(let i=0;i<4;i++){
+  ctx.fillStyle=i===diffIdx?'#c7950e':'#8d6e40';
+  ctx.fillText((i===diffIdx?'[ ':'  ')+diffNames[i]+(i===diffIdx?' ]':''),W/2-100+i*120,500);
+ }
+
+ ctx.font='16px sans-serif';ctx.fillStyle='#5c4033';
+ ctx.fillText('↑↓: mode  |  D: difficulty  |  Enter: start  |  H: hint  |  Esc: pause',W/2,560);
+ ctx.fillStyle='#c7950e';
+ ctx.font='18px sans-serif';
+ ctx.fillText('High Score: '+highScore,W/2,50);
+}
+
+function drawGame(){
+ drawHexBackground();
+
+ // Flash overlay
+ if(flashTimer>0){
+  ctx.fillStyle=flashColor+'44';
+  ctx.fillRect(0,0,W,H);
+ }
+
+ // Clue area
+ ctx.fillStyle='rgba(61,43,31,0.9)';
+ ctx.fillRect(120,50,720,140);
+ ctx.strokeStyle='#c7950e';ctx.lineWidth=3;
+ ctx.strokeRect(120,50,720,140);
+
+ ctx.textAlign='center';
+
+ // Mode-specific display
+ if(mode===0){ // See & Spell
+  if(showWordPhase&&showWordTimer>0){
+   ctx.font='bold 48px sans-serif';
+   ctx.fillStyle='#ffd700';
+   ctx.fillText(currentWord.toUpperCase(),W/2,150);
+   ctx.font='18px sans-serif';
+   ctx.fillStyle='#aaa';
+   ctx.fillText('Memorize this word!',W/2,175);
+  }else{
+   ctx.font='22px sans-serif';
+   ctx.fillStyle='#ffd700';
+   ctx.fillText('Type the word you saw:',W/2,110);
+   ctx.font='16px sans-serif';
+   ctx.fillStyle='#ccc';
+   ctx.fillText('(It was shown for 3 seconds)',W/2,145);
+  }
+ }else if(mode===1){ // Hear & Spell
+  ctx.font='22px sans-serif';
+  ctx.fillStyle='#ffd700';
+  ctx.fillText('Spell this word:',W/2,110);
+  ctx.font='16px sans-serif';
+  ctx.fillStyle='#ccc';
+  ctx.fillText('Hint: '+currentWord.split('').map((l,i)=>i===0?l:'_').join(' '),W/2,145);
+ }else if(mode===2){ // Definition Clues
+  ctx.font='20px sans-serif';
+  ctx.fillStyle='#ffd700';
+  ctx.fillText('What word matches this definition?',W/2,85);
+  ctx.font='bold 24px sans-serif';
+  ctx.fillStyle='#ffffff';
+  ctx.fillText(currentEntry.hint,W/2,130);
+ }else if(mode===3){ // Speed Spell
+  ctx.font='22px sans-serif';
+  ctx.fillStyle='#ffd700';
+  ctx.fillText('Spell the word!  Time: '+Math.ceil(speedTimeLeft)+'s',W/2,85);
+  ctx.font='20px sans-serif';
+  ctx.fillStyle='#ccc';
+  ctx.fillText('Definition: '+currentEntry.hint,W/2,130);
+ }else if(mode===4){ // Jumble Rescue
+  ctx.font='22px sans-serif';
+  ctx.fillStyle='#ffd700';
+  ctx.fillText('Unscramble these letters:',W/2,85);
+  ctx.font='bold 36px sans-serif';
+  ctx.fillStyle='#ffffff';
+  ctx.fillText(jumbleLetters.join('  '),W/2,130);
+ }
+
+ // Input field
+ ctx.fillStyle='rgba(0,0,0,0.4)';
+ ctx.fillRect(230,220,500,50);
+ ctx.strokeStyle='#c7950e';ctx.lineWidth=2;
+ ctx.strokeRect(230,220,500,50);
+
+ ctx.textAlign='center';
+ ctx.font='bold 28px sans-serif';
+ ctx.fillStyle='#ffffff';
+ const cursor=Math.floor(Date.now()/500)%2?'|':'';
+ ctx.fillText(inputBuffer+cursor,W/2,255);
+
+ // HUD
+ ctx.textAlign='left';
+ ctx.font='bold 20px "Courier New",Courier,monospace';
+ ctx.fillStyle='#3d2b1f';
+ ctx.fillText('Score: '+score,20,30);
+ ctx.textAlign='right';
+ ctx.fillStyle='#ef5350';
+ let hearts='';
+ for(let i=0;i<lives;i++)hearts+='♥ ';
+ ctx.fillText(hearts,W-20,30);
+ ctx.textAlign='left';
+ ctx.fillStyle='#7cb342';
+ ctx.font='18px sans-serif';
+ ctx.fillText('Streak: '+streak+'x  |  Words: '+totalWords+'  |  H: Hint',20,55);
+
+ if(hintUsed){
+  ctx.fillStyle='#c7950e';
+  ctx.fillText('Hint used — points halved!',20,78);
+ }
+
+ // Hint display
+ if(hintUsed&&currentWord){
+  ctx.fillStyle='#ffd700';
+  ctx.font='18px sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText('First letter: '+currentWord[0].toUpperCase(),W/2,290);
+ }
+}
+
+function drawGameOver(){
+ ctx.fillStyle='rgba(61,43,31,0.9)';ctx.fillRect(0,0,W,H);
+ ctx.textAlign='center';
+ ctx.shadowColor='#ef5350';ctx.shadowBlur=20;
+ ctx.font='bold 56px sans-serif';
+ ctx.fillStyle='#ef5350';
+ ctx.fillText('Game Over',W/2,160);
+ ctx.shadowBlur=0;
+
+ ctx.font='28px sans-serif';ctx.fillStyle='#ffd700';
+ ctx.fillText('Score: '+score,W/2,230);
+ ctx.fillStyle='#ffffff';
+ ctx.fillText('High Score: '+highScore,W/2,270);
+
+ ctx.font='20px sans-serif';ctx.fillStyle='#ccc';
+ ctx.fillText('Words Correct: '+gameOverStats.correctWords+' / '+gameOverStats.totalWords,W/2,320);
+ ctx.fillText('Accuracy: '+gameOverStats.accuracy+'%',W/2,350);
+ ctx.fillText('Best Streak: '+gameOverStats.maxStreak+'x',W/2,380);
+
+ ctx.font='22px sans-serif';ctx.fillStyle='#7cb342';
+ ctx.fillText('Press Enter to Play Again',W/2,470);
+}
+
+function drawPaused(){
+ ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(0,0,W,H);
+ ctx.textAlign='center';
+ ctx.font='bold 48px sans-serif';
+ ctx.fillStyle='#ffd700';
+ ctx.fillText('PAUSED',W/2,H/2-20);
+ ctx.font='20px sans-serif';
+ ctx.fillStyle='#ffffff';
+ ctx.fillText('Press Esc or P to resume',W/2,H/2+30);
+}
+
+// ---- UPDATE ----
+function updatePlaying(dt){
+ if(flashTimer>0)flashTimer-=dt;
+ updateParticles(dt);
+
+ // Show word timer for See & Spell
+ if(mode===0&&showWordPhase){
+  showWordTimer-=dt;
+  if(showWordTimer<=0)showWordPhase=false;
+ }
+
+ // Speed Spell timer
+ if(mode===3){
+  speedTimeLeft-=dt;
+  if(speedTimeLeft<=0){
+   state='gameover';
+   gameOverStats={score,correctWords,totalWords,accuracy:totalWords>0?Math.round(correctWords/totalWords*100):0,maxStreak};
+   if(score>highScore){highScore=score;localStorage.setItem('sb_highScore',highScore);}
+   playGameOver();
+  }
+ }
+}
+
+// ---- MAIN LOOP ----
+let lastTime=0;
+
+function gameLoop(timestamp){
+ const dt=Math.min((timestamp-lastTime)/1000,0.05);
+ lastTime=timestamp;
+
+ ctx.clearRect(0,0,W,H);
+
+ if(state==='title'){
+  drawTitle();
+  if(justPressed('ArrowUp')||justPressed('w')||justPressed('W')){mode=(mode-1+5)%5;}
+  if(justPressed('ArrowDown')||justPressed('s')||justPressed('S')){mode=(mode+1)%5;}
+  if(justPressed('d')||justPressed('D')){diffIdx=(diffIdx+1)%4;}
+  if(justPressed('Enter')||justPressed(' ')){state='playing';prepareGame();initAudio();}
+  if(mouse.clicked){
+   const my=mouse.y;
+   if(my>=270&&my<460){
+    const idx=Math.floor((my-270)/38);
+    if(idx>=0&&idx<5)mode=idx;
+   }
+   if(my>=485&&my<515){
+    const idx=Math.floor((mouse.x-(W/2-100))/120);
+    if(idx>=0&&idx<4)diffIdx=idx;
+   }
+   if(my>=540&&my<580){state='playing';prepareGame();initAudio();}
+   mouse.clicked=false;
+  }
+  for(const k in keys)if(keys[k]===2)keys[k]=1;
+  requestAnimationFrame(gameLoop);return;
+ }
+
+ if(state==='playing'||state==='paused'){
+  if(paused||justPressed('Escape')||justPressed('p')||justPressed('P')){
+   paused=!paused;
+  }
+  if(paused){
+   drawGame();
+   drawPaused();
+   for(const k in keys)if(keys[k]===2)keys[k]=1;
+   requestAnimationFrame(gameLoop);return;
+  }
+
+  updatePlaying(dt);
+  drawGame();
+
+  // Input
+  // Letter keys
+  for(let c=65;c<=90;c++){
+   const letter=String.fromCharCode(c);
+   if(justPressed(letter)||justPressed(letter.toLowerCase())){
+    if(inputBuffer.length<30){
+     inputBuffer+=letter;
+    }
+   }
+  }
+  // Space for the letter "Space" in words... but mostly we just handle letters
+  // Actually let's handle spaces for compound words
+  if(justPressed(' ')){
+   if(inputBuffer.length<30&&mode!==3)inputBuffer+=' ';
+  }
+  // Apostrophe
+  if(justPressed("'")||justPressed("'")){
+   if(inputBuffer.length<30)inputBuffer+="'";
+  }
+  // Backspace
+  if(justPressed('Backspace')){
+   inputBuffer=inputBuffer.slice(0,-1);
+  }
+  // Hint
+  if(justPressed('h')||justPressed('H')){
+   if(!hintUsed&&currentWord){
+    hintUsed=true;
+    playHint();
+   }
+  }
+  // Submit
+  if(justPressed('Enter')){
+   if(inputBuffer.trim()!==''){
+    checkSpelling();
+   }
+  }
+
+  // Render particles
+  for(const p of particles){
+   ctx.globalAlpha=p.life;
+   ctx.fillStyle=p.color;
+   ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+  }
+  ctx.globalAlpha=1;
+ }
+
+ if(state==='gameover'){
+  drawGameOver();
+  // Particles continue
+  updateParticles(dt);
+  for(const p of particles){
+   ctx.globalAlpha=p.life;
+   ctx.fillStyle=p.color;
+   ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+  }
+  ctx.globalAlpha=1;
+  if(justPressed('Enter')||justPressed(' ')){state='title';}
+  if(mouse.clicked&&mouse.y>440&&mouse.y<510){state='title';mouse.clicked=false;}
+ }
+
+ for(const k in keys)if(keys[k]===2)keys[k]=1;
+ if(mouse.clicked)mouse.clicked=false;
+
+ requestAnimationFrame(gameLoop);
+}
+
+// Handle resize
+function resizeCanvas(){
+ const container=document.getElementById('gameContainer');
+ const scale=Math.min(container.clientWidth/W,container.clientHeight/H);
+ canvas.style.width=(W*scale)+'px';canvas.style.height=(H*scale)+'px';
+}
+window.addEventListener('resize',resizeCanvas);
+resizeCanvas();
+
+requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>
